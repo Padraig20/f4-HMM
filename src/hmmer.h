@@ -139,10 +139,19 @@ enum p7h_transitions_e {
 };
 #define p7H_NTRANSITIONS 9 /* Change this for f4-HMM */
 
+/* Parameters used for estimating transition probabilities if fig-4 HMM */
+enum f4h_params_e {
+  f4H_ALPHA = 0,
+  f4H_BETA  = 1,
+  f4H_DELTA = 2,
+  f4H_EPSILON = 3
+};
+#define f4H_NPARAMS 4
+
 /* How the hmm->t[k] vector is interpreted as separate probability vectors. */
 #define P7H_TMAT(hmm, k) ((hmm)->t[k])
 #define P7H_TINS(hmm, k) ((hmm)->t[k]+3)
-#define P7H_TDEL(hmm, k) ((hmm)->t[k]+5)
+#define P7H_TDEL(hmm, k) ((hmm)->t[k]+6)
 #define p7H_NTMAT 3
 #define p7H_NTDEL 3 /* Change this for f4-HMM */
 #define p7H_NTINS 3 /* Change this for f4-HMM */
@@ -165,6 +174,7 @@ typedef struct p7_hmm_s {
   float **t;                    /* transition prob's. t[(0),1..M][0..p7H_NTRANSITIONS-1]   */
   float **mat;                  /* match emissions.  mat[1..M][0..K-1]                     */ 
   float **ins;                  /* insert emissions. ins[1..M][0..K-1]                     */
+  float **tp;                   /* parameter transitions for f4-hmm. tp[0..M][0..3]        */
   /*::cexcerpt::plan7_core::end::*/
 
   /* Annotation. Everything but <name> is optional. Flags are set when
@@ -520,6 +530,7 @@ typedef struct p7_prior_s {
   ESL_MIXDCHLET *td;		/* delete transitions */
   ESL_MIXDCHLET *em;		/*  match emissions   */
   ESL_MIXDCHLET *ei;		/* insert emissions   */
+  ESL_MIXDCHLET *pr;    /* parameter transitions */
 } P7_PRIOR;
 
 
@@ -1668,6 +1679,7 @@ extern P7_PRIOR  *p7_prior_CreateLaplace(const ESL_ALPHABET *abc);
 extern void       p7_prior_Destroy(P7_PRIOR *pri);
 
 extern int        p7_ParameterEstimation(P7_HMM *hmm, const P7_PRIOR *pri);
+extern int        f4_ParameterEstimation(P7_HMM *hmm, const P7_PRIOR *pri);
 
 /* p7_profile.c */
 extern P7_PROFILE *p7_profile_Create(int M, const ESL_ALPHABET *abc);
@@ -1771,6 +1783,7 @@ extern int  p7_trace_FauxFromMSA(ESL_MSA *msa, int *matassign, int optflags, P7_
 extern int  p7_trace_Doctor(P7_TRACE *tr, int *opt_ndi, int *opt_nid);
 
 extern int  p7_trace_Count(P7_HMM *hmm, ESL_DSQ *dsq, float wt, P7_TRACE *tr);
+extern int  f4_trace_Count(P7_HMM *hmm, ESL_DSQ *dsq, float wt, P7_TRACE *tr);
 
 
 /* seqmodel.c */

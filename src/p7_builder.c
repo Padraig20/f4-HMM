@@ -408,6 +408,9 @@ static int    make_post_msa        (P7_BUILDER *bld, const ESL_MSA *premsa, cons
  *
  * Throws:    <eslEMEM> on allocation error.
  *            <eslEINVAL> if relative weights couldn't be calculated from <msa>.
+ * 
+ * TODO:      We need better DI and ID transition priors. Furthermore, we need
+ *            a way to estimate the priors for the four parameters.
  *
  * Xref:      J4/30.
  */
@@ -428,18 +431,27 @@ p7_Builder(P7_BUILDER *bld, ESL_MSA *msa, P7_BG *bg,
   if ((status =  esl_msa_MarkFragments_old(msa, bld->fragthresh))           != eslOK) goto ERROR;
   if ((status =  build_model          (bld, msa, &hmm, tr_ptr))         != eslOK) goto ERROR;
 
-
   //Ensures that the weighted-average I->I count <=  bld->max_insert_len
   //(MI currently contains the number of observed insert-starts)
   if (bld->max_insert_len>0)
     for (i=1; i<hmm->M; i++ )
-      hmm->t[i][p7H_II] = ESL_MIN(hmm->t[i][p7H_II], bld->max_insert_len*hmm->t[i][p7H_MI]);
+      hmm-> t[i][p7H_II]    = ESL_MIN(hmm-> t[i][p7H_II],   bld->max_insert_len*(hmm-> t[i][p7H_MI] + bld->max_insert_len*hmm->t[i][p7H_DI]));
+      hmm->tp[i][f4H_BETA]  = ESL_MIN(hmm->tp[i][f4H_BETA], bld->max_insert_len*(hmm->tp[i][f4H_ALPHA] * 2));
 
   if ((status =  effective_seqnumber  (bld, msa, hmm, bg))              != eslOK) goto ERROR;
   if ((status =  parameterize         (bld, hmm))                       != eslOK) goto ERROR;
   if ((status =  annotate             (bld, msa, hmm))                  != eslOK) goto ERROR;
   if ((status =  calibrate            (bld, hmm, bg, opt_gm, opt_om))   != eslOK) goto ERROR;
   if ((status =  make_post_msa        (bld, msa, hmm, tr, opt_postmsa)) != eslOK) goto ERROR;
+
+  printf("hmm->tp matrix:\n");
+  for (i = 1; i < hmm->M; i++) {
+    printf("tp[%d]:", i);
+    for (j = 0; j < f4H_NPARAMS; j++) {
+      printf(" %g", hmm->tp[i][j]);
+    }
+    printf("\n");
+  }
 
   //force masked positions to background  (it'll be close already, so no relevant impact on weighting)
   if (hmm->mm != NULL)
@@ -945,7 +957,8 @@ parameterize(P7_BUILDER *bld, P7_HMM *hmm)
 {
   int status;
 
-  if ((status = p7_ParameterEstimation(hmm, bld->prior)) != eslOK) ESL_XFAIL(status, bld->errbuf, "parameter estimation failed");
+  //if ((status = p7_ParameterEstimation(hmm, bld->prior)) != eslOK) ESL_XFAIL(status, bld->errbuf, "parameter estimation failed");
+  if ((status = f4_ParameterEstimation(hmm, bld->prior)) != eslOK) ESL_XFAIL(status, bld->errbuf, "parameter estimation failed");
 
   return eslOK;
 

@@ -1539,7 +1539,7 @@ p7_trace_Count(P7_HMM *hmm, ESL_DSQ *dsq, float wt, P7_TRACE *tr)
 	case p7T_M: hmm->t[k][p7H_IM] += wt; break;
 	case p7T_I: hmm->t[k][p7H_II] += wt; break;
 	case p7T_E: hmm->t[k][p7H_IM] += wt; break; /* k==M. */
-  case p7T_D: hmm->t[k][p7H_ID] += wt; printf("\n\n TRANSITION FROM I TO D at %d \n\n", k); break; /* Add this for f4-HMM */
+  case p7T_D: hmm->t[k][p7H_ID] += wt; break; /* Add this for f4-HMM */
 	default:     ESL_EXCEPTION(eslEINVAL, "bad transition in trace");
 	}
       }
@@ -1548,7 +1548,153 @@ p7_trace_Count(P7_HMM *hmm, ESL_DSQ *dsq, float wt, P7_TRACE *tr)
 	case p7T_M: hmm->t[k][p7H_DM] += wt; break;
 	case p7T_D: hmm->t[k][p7H_DD] += wt; break;
 	case p7T_E: hmm->t[k][p7H_DM] += wt; break; /* k==M. A local alignment would've been Dk->X->E. */
-  case p7T_I: hmm->t[k][p7H_DI] += wt; printf("\n\n TRANSITION FROM D TO I at %d \n\n", k); break; /* Add this for f4-HMM */
+  case p7T_I: hmm->t[k][p7H_DI] += wt; break; /* Add this for f4-HMM */
+	default:     ESL_EXCEPTION(eslEINVAL, "bad transition in trace");
+	}
+      }
+    } /* end loop over trace position */
+  return eslOK;
+}
+
+
+/* Function: f4_trace_Count()
+ * 
+ * Purpose:  Count a traceback into a count-based core HMM structure.
+ *           (Usually as part of a model parameter re-estimation.)
+ *           This is a special version of <p7_trace_Count()> for f4-HMMs,
+ *           which allows D->I and I->D transitions, and does not count
+ *           based on transition occurrences, but on the actual parameters,
+ *           alpha, beta, delta and epsilon that are used to later
+ *           estimate the model parameters (transitions).
+ *           
+ *           The traceback may either be a core traceback (as in model
+ *           construction) or a profile traceback (as in model
+ *           reestimation).
+ *           
+ *           If it is a profile traceback, we have to be careful how
+ *           we translate an internal entry path from a score profile
+ *           back to the core model. Sometimes a B->M_k transition is
+ *           an internal entry from local alignment, and sometimes it
+ *           is a wing-folded B->D_1..DDM_k alignment to the core
+ *           model.
+ *           
+ *           This is one of the purposes of the special p7T_X
+ *           'missing data' state in tracebacks. Local alignment entry
+ *           is indicated by a B->X->{MDI}_k 'missing data' path, and
+ *           direct B->M_k or M_k->E transitions in a traceback are
+ *           interpreted as wing retraction in a glocal model.
+ * 
+ *           The <p7T_X> state is also used in core traces in model
+ *           construction literally to mean missing data, in the
+ *           treatment of sequence fragments.
+ *
+ * Args:     hmm   - counts-based HMM to count <tr> into
+ *           tr    - alignment of seq to HMM
+ *           dsq   - digitized sequence that traceback aligns to the HMM (1..L)
+ *                   (or can be an ax, aligned digital seq)
+ *           wt    - weight on this sequence
+ *           
+ * Return:   <eslOK> on success.
+ *           Weighted count events are accumulated in hmm's mat[][], ins[][],
+ *           tp[][] fields: the core probability model.
+ *           
+ * Throws:   <eslEINVAL> if something's corrupt in the trace; effect on hmm
+ *           counts is undefined, because it may abort at any point in the trace.
+ */
+int
+f4_trace_Count(P7_HMM *hmm, ESL_DSQ *dsq, float wt, P7_TRACE *tr)
+{
+  int z;			/* position index in trace */
+  int i;			/* symbol position in seq */
+  int st,st2;     		/* state type (cur, nxt)  */
+  int k,k2,ktmp;		/* node index (cur, nxt)  */
+  int z1 = 0;			/* left bound - may get set to an M position for a left fragment */
+  int z2 = tr->N-1;		/* right bound, ditto for a right fragment. N-1 not N, because main loop accesses z,z+1 */
+  
+  /* If this is a core fragment trace (it has B->X and/or X->E) then
+   * set z1 and/or z2 bound on first and/or last M state, so we don't
+   * count incomplete flanking insertions. A fragment doesn't
+   * necessarily have X's on both sides because of the way they get
+   * set from ~'s in an input alignment.
+   * 
+   * A local alignment profile trace has B->X and X->E, and may have
+   * >1 domain, but is guaranteed to be B->X->Mk, Mk->X->E, so
+   * limiting trace counting to z1..z2 would have no effect... nonetheless,
+   * we check, differentiating core vs. profile trace by the lead B vs S.
+   * 
+   * It's possible for a core trace to have no M's at all, just
+   * B->(X)->III->(X)->E, as in bug #h82, so watch out for that; we don't
+   * count anything in such a trace, even the II transitions, because
+   * we don't get to see the complete length of the insertion (or the
+   * IM transition), so we don't want to be estimating the I-state
+   * geometric distribution from it.
+   */
+  if (tr->st[0] == p7T_B && tr->st[1] == p7T_X)
+    for (z = 2; z < tr->N-1; z++)
+      if (tr->st[z] == p7T_M) { z1 = z; break; }
+  if (tr->st[tr->N-1] == p7T_E && tr->st[tr->N-2] == p7T_X)
+    for (z = tr->N-3; z > 0; z--)
+      if (tr->st[z] == p7T_M) { z2 = z; break; }
+  
+  for (z = z1; z < z2; z++) 
+    {
+      if (tr->st[z] == p7T_X) continue; /* skip missing data */
+
+      /* pull some info into tmp vars for notational clarity later. */
+      st  = tr->st[z]; 
+      st2 = tr->st[z+1];
+      k   = tr->k[z]; 
+      k2  = tr->k[z+1];
+      i   = tr->i[z];
+
+      /* Emission counts. */
+      if      (st == p7T_M) esl_abc_FCount(hmm->abc, hmm->mat[k], dsq[i], wt);
+      else if (st == p7T_I) esl_abc_FCount(hmm->abc, hmm->ins[k], dsq[i], wt);
+
+      /* Transition counts */
+      if (st2 == p7T_X) continue; /* ignore transition to missing data */
+
+      if (st == p7T_B) {
+	if (st2 == p7T_M && k2 > 1)   /* wing-retracted B->DD->Mk path */
+	  {
+	    hmm->tp[0][f4H_DELTA] += wt; //MD
+	    for (ktmp = 1; ktmp < k2-1; ktmp++) 
+	      hmm->tp[ktmp][f4H_EPSILON] += wt; hmm->tp[ktmp][f4H_DELTA] += wt; //DD
+	    //hmm->tp[ktmp][p7H_DM] += wt; //DM not counted
+	  }
+	else  {
+	  switch (st2) {
+	  case p7T_M: break; //MM not counted
+	  case p7T_I: hmm->tp[0][f4H_ALPHA] += wt; break; //MI
+	  case p7T_D: hmm->tp[0][f4H_DELTA] += wt; break; //MD
+	  default:     ESL_EXCEPTION(eslEINVAL, "bad transition in trace");
+	  }
+	}
+      }
+      else if (st == p7T_M) {
+     	switch (st2) {
+	case p7T_M: break; //MM not counted
+	case p7T_I: hmm->tp[k][f4H_ALPHA] += wt; break; //MI
+	case p7T_D: hmm->tp[k][f4H_DELTA] += wt; break; //MD
+	case p7T_E: break; /* k==M. A local alignment would've been Mk->X->E. */ //MM not counted
+	default:     ESL_EXCEPTION(eslEINVAL, "bad transition in trace");
+	}
+      }
+      else if (st == p7T_I) {
+	switch (st2) {
+	case p7T_M: break; //IM not counted
+	case p7T_I: hmm->tp[k][f4H_BETA] += wt; break; //II
+	case p7T_E: break; /* k==M. */ //IM not counted
+  case p7T_D: hmm->tp[k][f4H_DELTA] += wt; break; /* Add this for f4-HMM */ //ID
+	default:     ESL_EXCEPTION(eslEINVAL, "bad transition in trace");
+	}
+      }
+      else if (st == p7T_D) {
+	switch (st2) {
+	case p7T_M: break; //DM not counted
+	case p7T_D: hmm->tp[k][f4H_EPSILON] += wt; hmm->tp[k][f4H_DELTA] += wt; break; //DD
+	case p7T_E: break; /* k==M. A local alignment would've been Dk->X->E. */ //DM not counted
+  case p7T_I: hmm->tp[k][f4H_ALPHA] += wt; break; /* Add this for f4-HMM */ //DI
 	default:     ESL_EXCEPTION(eslEINVAL, "bad transition in trace");
 	}
       }

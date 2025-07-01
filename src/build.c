@@ -300,37 +300,9 @@ matassign2hmm(ESL_MSA *msa, int *matassign, P7_HMM **ret_hmm, P7_TRACE ***opt_tr
   if ((status = p7_hmm_Zero(hmm))           != eslOK) goto ERROR;
   for (idx = 0; idx < msa->nseq; idx++) {
     if (tr[idx] == NULL) continue; /* skip rare examples of empty sequences */
-    if ((status = p7_trace_Count(hmm, msa->ax[idx], msa->wgt[idx], tr[idx])) != eslOK) goto ERROR;
+    //if ((status = p7_trace_Count(hmm, msa->ax[idx], msa->wgt[idx], tr[idx])) != eslOK) goto ERROR;
+    if ((status = f4_trace_Count(hmm, msa->ax[idx], msa->wgt[idx], tr[idx])) != eslOK) goto ERROR;
   }
-
-  /*
-  printf("HMM MAT matrix (emission counts):\n");
-  for (int k = 1; k <= hmm->M; k++) {
-    printf("M%-3d:", k);
-    for (int x = 0; x < hmm->abc->K; x++) {
-      printf(" %d", hmm->mat[k][x]);
-    }
-    printf("\n");
-  }
-
-  printf("HMM INS matrix (emission counts):\n");
-  for (int k = 1; k <= hmm->M; k++) {
-    printf("D%-3d:", k);
-    for (int x = 0; x < hmm->abc->K; x++) {
-      printf(" %d", hmm->ins[k][x]);
-    }
-    printf("\n");
-  }
-
-  printf("HMM T matrix (transition counts):\n");
-  for (int k = 0; k <= hmm->M; k++) {
-    printf("T%-3d:", k);
-    for (int t = 0; t < p7H_NTRANSITIONS; t++) {
-      printf(" %d", hmm->t[k][t]);
-    }
-    printf("\n");
-  }
-  */
 
   hmm->nseq     = msa->nseq;
   hmm->eff_nseq = msa->nseq;

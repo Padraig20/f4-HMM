@@ -82,6 +82,7 @@ p7_hmm_CreateShell(void)
   ESL_ALLOC(hmm, sizeof(P7_HMM));
   hmm->M          = 0;
   hmm->t          = NULL;
+  hmm->tp         = NULL;
   hmm->mat        = NULL;
   hmm->ins        = NULL;
 
@@ -137,6 +138,7 @@ p7_hmm_CreateBody(P7_HMM *hmm, int M, const ESL_ALPHABET *abc)
 
   /* level 1 */
   ESL_ALLOC(hmm->t,    (M+1) * sizeof(float *));
+  ESL_ALLOC(hmm->tp,   (M+1) * sizeof(float *));
   ESL_ALLOC(hmm->mat,  (M+1) * sizeof(float *));
   ESL_ALLOC(hmm->ins,  (M+1) * sizeof(float *));
   hmm->t[0]   = NULL;
@@ -145,12 +147,14 @@ p7_hmm_CreateBody(P7_HMM *hmm, int M, const ESL_ALPHABET *abc)
 
   /* level 2 */
   ESL_ALLOC(hmm->t[0],   (p7H_NTRANSITIONS*(M+1)) * sizeof(float));
+  ESL_ALLOC(hmm->tp[0],  (f4H_NPARAMS*(M+1))      * sizeof(float));
   ESL_ALLOC(hmm->mat[0], (abc->K*(M+1))           * sizeof(float));
   ESL_ALLOC(hmm->ins[0], (abc->K*(M+1))           * sizeof(float));
   for (k = 1; k <= M; k++) {
     hmm->mat[k] = hmm->mat[0] + k * hmm->abc->K;
     hmm->ins[k] = hmm->ins[0] + k * hmm->abc->K;
     hmm->t[k]   = hmm->t[0]   + k * p7H_NTRANSITIONS;
+    hmm->tp[k]  = hmm->tp[0]  + k * f4H_NPARAMS;
   }
 
   /* Enforce conventions on unused but allocated distributions, so
@@ -195,6 +199,7 @@ p7_hmm_Destroy(P7_HMM *hmm)
   if (hmm->mat) {  if (hmm->mat[0]) free(hmm->mat[0]); free(hmm->mat); }
   if (hmm->ins) {  if (hmm->ins[0]) free(hmm->ins[0]); free(hmm->ins); }
   if (hmm->t)   {  if (hmm->t[0])   free(hmm->t[0]);   free(hmm->t);   }
+  if (hmm->tp)  {  if (hmm->tp[0])  free(hmm->tp[0]);  free(hmm->tp);  }
 
   if (hmm->name)      free(hmm->name);
   if (hmm->acc)       free(hmm->acc);
@@ -236,6 +241,7 @@ p7_hmm_CopyParameters(const P7_HMM *src, P7_HMM *dest)
   int k;
   for (k = 0; k <= src->M; k++) {
     esl_vec_FCopy(src->t[k],   p7H_NTRANSITIONS, dest->t[k]);
+    esl_vec_FCopy(src->tp[k],  f4H_NPARAMS,      dest->tp[k]);
     esl_vec_FCopy(src->mat[k], src->abc->K,      dest->mat[k]);
     esl_vec_FCopy(src->ins[k], src->abc->K,      dest->ins[k]);
   }
@@ -316,6 +322,7 @@ p7_hmm_Zero(P7_HMM *hmm)
 
   for (k = 0; k <= hmm->M; k++) {
     esl_vec_FSet(hmm->t[k],   p7H_NTRANSITIONS, 0.);  
+    esl_vec_FSet(hmm->tp[k],  f4H_NPARAMS,      0.);
     esl_vec_FSet(hmm->mat[k], hmm->abc->K, 0.);  
     esl_vec_FSet(hmm->ins[k], hmm->abc->K, 0.);  
   }
@@ -759,7 +766,8 @@ p7_hmm_Scale(P7_HMM *hmm, double scale)
   int k;
 
   for (k = 0; k <= hmm->M; k++) {
-    esl_vec_FScale(hmm->t[k],   p7H_NTRANSITIONS, scale);  
+    esl_vec_FScale(hmm->t[k],   p7H_NTRANSITIONS, scale); 
+    esl_vec_FScale(hmm->tp[k],  f4H_NPARAMS,      scale); 
     esl_vec_FScale(hmm->mat[k], hmm->abc->K,      scale);  
     esl_vec_FScale(hmm->ins[k], hmm->abc->K,      scale);  
   }
@@ -829,6 +837,7 @@ p7_hmm_ScaleExponential(P7_HMM *hmm, double exp)
     double scale = count>0 ? new_count / count : 1.0;  /* if no counts in the column (strange, but possible), just use default freqs*/
 
     esl_vec_FScale(hmm->t[k],   p7H_NTRANSITIONS, scale);
+    esl_vec_FScale(hmm->tp[k],  f4H_NPARAMS,      scale);
     esl_vec_FScale(hmm->mat[k], hmm->abc->K,      scale);
     esl_vec_FScale(hmm->ins[k], hmm->abc->K,      scale);
   }
@@ -956,8 +965,8 @@ p7_hmm_Sample(ESL_RANDOMNESS *r, int M, const ESL_ALPHABET *abc, P7_HMM **ret_hm
       if (k > 0) esl_dirichlet_FSampleUniform(r, abc->K, hmm->mat[k]);
       esl_dirichlet_FSampleUniform(r, abc->K, hmm->ins[k]);
       esl_dirichlet_FSampleUniform(r, 3,      hmm->t[k]);
-      esl_dirichlet_FSampleUniform(r, 2,      hmm->t[k]+3);
-      if (k > 0) esl_dirichlet_FSampleUniform(r, 2,      hmm->t[k]+5);
+      esl_dirichlet_FSampleUniform(r, 3,      hmm->t[k]+3);
+      if (k > 0) esl_dirichlet_FSampleUniform(r, 2,      hmm->t[k]+6);
     }
   /* Node M is special: no transitions to D, transitions to M
    * are interpreted as transitions to E. Overwrite a little of
@@ -1191,9 +1200,10 @@ p7_hmm_Compare(P7_HMM *h1, P7_HMM *h2, float tol)
   
   for (k = 0; k <= h1->M; k++)	/* (it's safe to include 0 here.) */
     {
-      if (esl_vec_FCompare(h1->mat[k], h2->mat[k], h1->abc->K, tol) != eslOK) return eslFAIL;
-      if (esl_vec_FCompare(h1->ins[k], h2->ins[k], h1->abc->K, tol) != eslOK) return eslFAIL;
-      if (esl_vec_FCompare(h1->t[k],   h2->t[k],   7,          tol) != eslOK) return eslFAIL;
+      if (esl_vec_FCompare(h1->mat[k], h2->mat[k], h1->abc->K,        tol) != eslOK) return eslFAIL;
+      if (esl_vec_FCompare(h1->ins[k], h2->ins[k], h1->abc->K,        tol) != eslOK) return eslFAIL;
+      if (esl_vec_FCompare(h1->t[k],   h2->t[k],   p7H_NTRANSITIONS,  tol) != eslOK) return eslFAIL;
+      if (esl_vec_FCompare(h1->tp[k],  h2->tp[k],  f4H_NPARAMS,       tol) != eslOK) return eslFAIL;
     }
 
   if (strcmp(h1->name,   h2->name)   != 0) return eslFAIL;
@@ -1265,8 +1275,8 @@ p7_hmm_Validate(P7_HMM *hmm, char *errbuf, float tol)
       if (esl_vec_FValidate(hmm->mat[k], hmm->abc->K, tol, NULL) != eslOK) ESL_XFAIL(eslFAIL, errbuf, "mat[%d] fails pvector validation", k);
       if (esl_vec_FValidate(hmm->ins[k], hmm->abc->K, tol, NULL) != eslOK) ESL_XFAIL(eslFAIL, errbuf, "ins[%d] fails pvector validation", k);
       if (esl_vec_FValidate(hmm->t[k],   3,           tol, NULL) != eslOK) ESL_XFAIL(eslFAIL, errbuf, "t_M[%d] fails pvector validation", k);
-      if (esl_vec_FValidate(hmm->t[k]+3, 2,           tol, NULL) != eslOK) ESL_XFAIL(eslFAIL, errbuf, "t_I[%d] fails pvector validation", k);
-      if (esl_vec_FValidate(hmm->t[k]+5, 2,           tol, NULL) != eslOK) ESL_XFAIL(eslFAIL, errbuf, "t_D[%d] fails pvector validation", k);
+      if (esl_vec_FValidate(hmm->t[k]+3, 3,           tol, NULL) != eslOK) ESL_XFAIL(eslFAIL, errbuf, "t_I[%d] fails pvector validation", k);
+      if (esl_vec_FValidate(hmm->t[k]+6, 3,           tol, NULL) != eslOK) ESL_XFAIL(eslFAIL, errbuf, "t_D[%d] fails pvector validation", k);
     }
   if (hmm->t[hmm->M][p7H_MD] != 0.0)                       ESL_XFAIL(eslFAIL, errbuf, "TMD should be 0 for last node");
   if (hmm->t[hmm->M][p7H_DM] != 1.0)                       ESL_XFAIL(eslFAIL, errbuf, "TDM should be 1 for last node");
