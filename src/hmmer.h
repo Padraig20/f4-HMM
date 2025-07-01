@@ -141,12 +141,15 @@ enum p7h_transitions_e {
 
 /* Parameters used for estimating transition probabilities if fig-4 HMM */
 enum f4h_params_e {
-  f4H_ALPHA = 0,
-  f4H_BETA  = 1,
-  f4H_DELTA = 2,
-  f4H_EPSILON = 3
+  f4H_ALPHA     = 0,
+  f4H_DELTA     = 1,
+  f4H_GAMMA     = 2,
+  f4H_BETA      = 3,
+  f4H_BETAP     = 4,
+  f4H_EPSILON   = 5,
+  f4H_EPSILONP  = 6
 };
-#define f4H_NPARAMS 4
+#define f4H_NPARAMS 7
 
 /* How the hmm->t[k] vector is interpreted as separate probability vectors. */
 #define P7H_TMAT(hmm, k) ((hmm)->t[k])
@@ -530,7 +533,9 @@ typedef struct p7_prior_s {
   ESL_MIXDCHLET *td;		/* delete transitions */
   ESL_MIXDCHLET *em;		/*  match emissions   */
   ESL_MIXDCHLET *ei;		/* insert emissions   */
-  ESL_MIXDCHLET *pr;    /* parameter transitions */
+  ESL_MIXDCHLET *pradg; /* parameter transitions - alpha, delta, gamma */
+  ESL_MIXDCHLET *prb;   /* parameter transitions - beta, beta' */
+  ESL_MIXDCHLET *pre;   /* parameter transitions - epsilon, epsilon' */
 } P7_PRIOR;
 
 

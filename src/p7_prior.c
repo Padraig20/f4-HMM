@@ -60,12 +60,14 @@ p7_prior_CreateAmino(void)
   ESL_ALLOC(pri, sizeof(P7_PRIOR));
   pri->tm = pri->ti = pri->td = pri->em = pri->ei = NULL;
 
-  pri->tm = esl_mixdchlet_Create(1, 3);	 /* single component; 3 params */
-  pri->ti = esl_mixdchlet_Create(1, 3);	 /* single component; 3 params */
-  pri->td = esl_mixdchlet_Create(1, 3);	 /* single component; 3 params */
-  pri->pr = esl_mixdchlet_Create(1, 4);	 /* single component; 4 params */
-  pri->em = esl_mixdchlet_Create(9, 20); /* 9 component; 20 params */
-  pri->ei = esl_mixdchlet_Create(1, 20); /* single component; 20 params */
+  pri->tm    = esl_mixdchlet_Create(1, 3);	 /* single component; 3 params */
+  pri->ti    = esl_mixdchlet_Create(1, 3);	 /* single component; 3 params */
+  pri->td    = esl_mixdchlet_Create(1, 3);	 /* single component; 3 params */
+  pri->pradg = esl_mixdchlet_Create(1, 3);	 /* single component; 3 params */
+  pri->prb   = esl_mixdchlet_Create(1, 2);	 /* single component; 2 params */
+  pri->pre   = esl_mixdchlet_Create(1, 2);   /* single component; 2 params */
+  pri->em    = esl_mixdchlet_Create(9, 20);  /* 9 component; 20 params */
+  pri->ei    = esl_mixdchlet_Create(1, 20);  /* single component; 20 params */
 
   if (pri->tm == NULL || pri->ti == NULL || pri->td == NULL || pri->em == NULL || pri->ei == NULL) goto ERROR;
 
@@ -80,18 +82,25 @@ p7_prior_CreateAmino(void)
   pri->ti->q[0]        = 1.0;
   pri->ti->alpha[0][0] = 0.1551; /* TIM */
   pri->ti->alpha[0][1] = 0.1331; /* TII */
-  pri->ti->alpha[0][2] = 0.01; /* TID */ // added here an arbitrary value - we did not learn this
+  pri->ti->alpha[0][2] = 0.01;   /* TID */ // added here an arbitrary value - we did not learn this
 
   pri->td->q[0]        = 1.0;
   pri->td->alpha[0][0] = 0.9002; /* TDM */
   pri->td->alpha[0][1] = 0.5630; /* TDD */
-  pri->td->alpha[0][2] = 0.01;    /* TDI */ // added here an arbitrary value - we did not learn this
+  pri->td->alpha[0][2] = 0.01;   /* TDI */ // added here an arbitrary value - we did not learn this
 
-  pri->pr->q[0]                  = 1.0; // parameter transitions
-  pri->pr->alpha[0][f4H_ALPHA]   = 0.0278 + 0.1331; // alpha -    same as TMI + TII
-  pri->pr->alpha[0][f4H_BETA]    = 0.1331;          // beta  -    same as TII
-  pri->pr->alpha[0][f4H_DELTA]   = 0.0135 + 0.01;   // delta -    same as TMD + TID
-  pri->pr->alpha[0][f4H_EPSILON] = 0.5630;          // epsilon -  same as TDD
+  pri->pradg->q[0]                   = 1.0;                      // alpha, delta, gamma transitions
+  pri->pradg->alpha[0][f4H_ALPHA]    = 0.0278 + 0.1331;          // alpha    -    same as TMI + TII
+  pri->pradg->alpha[0][f4H_DELTA]    = 0.0135 + 0.01;            // delta    -    same as TMD + TID
+  pri->pradg->alpha[0][f4H_GAMMA]    = 0.7939 + 0.1551 + 0.9002; // gamma    -    same as TMM + TIM + TDM
+
+  pri->prb->q[0]                     = 1.0;                      // beta transitions
+  pri->prb->alpha[0][f4H_BETA-3]     = 0.1331;                   // beta     -    same as TII
+  pri->prb->alpha[0][f4H_BETAP-3]    = 0.1331 + 0.1551 + 0.01;   // betap    -    same as TII + TIM + TID
+
+  pri->pre->q[0]                     = 1.0;                      // epsilon transitions
+  pri->pre->alpha[0][f4H_EPSILON-5]  = 0.5630;                   // epsilon  -    same as TDD
+  pri->pre->alpha[0][f4H_EPSILONP-5] = 0.5630 + 0.9002 + 0.01;   // epsilonp -    same as TDD + TDM + TDI
 
   /* Match emission priors are from Kimmen Sjolander, trained
    * on the Blocks9 database. [Sjolander96]
@@ -189,11 +198,13 @@ p7_prior_CreateNucleic(void)
   pri->tm = esl_mixdchlet_Create(1, 3);        // match transitions; single component; 3 params
   pri->ti = esl_mixdchlet_Create(1, 3);        // insert transitions; single component; 3 params
   pri->td = esl_mixdchlet_Create(1, 3);        // delete transitions; single component; 3 params
-  pri->pr = esl_mixdchlet_Create(1, 4);        // parameter transitions; single component; 4 params
+  pri->pradg = esl_mixdchlet_Create(1, 3);     // alpha, delta, gamma transitions; single component; 3 params
+  pri->prb = esl_mixdchlet_Create(1, 2);       // beta transitions; single component; 2 params
+  pri->pre = esl_mixdchlet_Create(1, 2);       // epsilon transitions; single component; 2 params
   pri->em = esl_mixdchlet_Create(num_comp, 4); // match emissions; X component; 4 params
   pri->ei = esl_mixdchlet_Create(1, 4);        // insert emissions; single component; 4 params
 
-  if (pri->tm == NULL || pri->ti == NULL || pri->td == NULL || pri->em == NULL || pri->ei == NULL) goto ERROR;
+  if (pri->tm == NULL || pri->ti == NULL || pri->td == NULL || pri->em == NULL || pri->ei == NULL || pri->pradg == NULL || pri->prb == NULL || pri->pre == NULL ) goto ERROR;
 
   /* Transition priors: roughly, learned from rmark benchmark - hand-beautified (trimming overspecified significant digits)
    */
@@ -212,11 +223,18 @@ p7_prior_CreateNucleic(void)
   pri->td->alpha[0][1] = 1.0;  // TDD -  was 0.2 (TW changed 3/19/15)
   pri->td->alpha[0][2] = 0.1;  // TDI -  added arbitrary non-zero value
 
-  pri->pr->q[0] = 1.0;                        // parameter transitions
-  pri->pr->alpha[0][f4H_ALPHA]   = 0.1 + 0.4; // alpha -    same as TMI + TII
-  pri->pr->alpha[0][f4H_BETA]    = 0.4;       // beta  -    same as TII
-  pri->pr->alpha[0][f4H_DELTA]   = 0.1 + 0.1; // delta -    same as TMD + TID
-  pri->pr->alpha[0][f4H_EPSILON] = 1.0;       // epsilon -  same as TDD
+  pri->pradg->q[0]                     = 1.0;               // alpha, delta, gamma transitions
+  pri->pradg->alpha[0][f4H_ALPHA]      = 0.1 + 0.4;         // alpha    -    same as TMI + TII
+  pri->pradg->alpha[0][f4H_DELTA]      = 0.1 + 0.1;         // delta    -    same as TMD + TID
+  pri->pradg->alpha[0][f4H_GAMMA]      = 2.0 + 0.12 + 0.5;  // gamma    -    same as TMM + TIM + TDM
+
+  pri->prb->q[0]                       = 1.0;               // beta transitions
+  pri->prb->alpha[0][f4H_BETA-3]       = 0.4;               // beta     -    same as TII
+  pri->prb->alpha[0][f4H_BETAP-3]      = 0.4 + 0.12 + 0.1;  // betap    -    same as TII + TIM + TID
+
+  pri->pre->q[0]                       = 1.0;               // epsilon transitions
+  pri->pre->alpha[0][f4H_EPSILON-5]    = 1.0;               // epsilon  -    same as TDD
+  pri->pre->alpha[0][f4H_EPSILONP-5]   = 1.0 + 0.5 + 0.1;   // epsilonp -    same as TDD + TDM + TDI
 
 
   /* Match emission priors  */
@@ -258,18 +276,22 @@ p7_prior_CreateLaplace(const ESL_ALPHABET *abc)
   pri->tm = esl_mixdchlet_Create(1, 3);	     /* single component; 3 params */
   pri->ti = esl_mixdchlet_Create(1, 3);	     /* single component; 3 params */
   pri->td = esl_mixdchlet_Create(1, 3);	     /* single component; 3 params */
-  pri->pr = esl_mixdchlet_Create(1, 4);      /* single component; 4 params */
+  pri->pradg = esl_mixdchlet_Create(1, 3);   /* single component; 3 params */
+  pri->prb = esl_mixdchlet_Create(1, 2);     /* single component; 2 params */
+  pri->pre = esl_mixdchlet_Create(1, 2);     /* single component; 2 params */
   pri->em = esl_mixdchlet_Create(1, abc->K); /* single component; K params */
   pri->ei = esl_mixdchlet_Create(1, abc->K); /* single component; K params */
 
-  if (pri->tm == NULL || pri->ti == NULL || pri->td == NULL || pri->em == NULL || pri->ei == NULL || pri->pr == NULL) goto ERROR;
+  if (pri->tm == NULL || pri->ti == NULL || pri->td == NULL || pri->em == NULL || pri->ei == NULL || pri->pradg == NULL || pri->prb == NULL || pri->pre == NULL) goto ERROR;
 
-  pri->tm->q[0] = 1.0;   esl_vec_DSet(pri->tm->alpha[0], 3,      1.0);  /* match transitions     */
-  pri->ti->q[0] = 1.0;   esl_vec_DSet(pri->ti->alpha[0], 3,      1.0);  /* insert transitions    */
-  pri->td->q[0] = 1.0;   esl_vec_DSet(pri->td->alpha[0], 3,      1.0);  /* delete transitions    */
-  pri->em->q[0] = 1.0;   esl_vec_DSet(pri->em->alpha[0], abc->K, 1.0);  /* match emissions       */
-  pri->ei->q[0] = 1.0;   esl_vec_DSet(pri->ei->alpha[0], abc->K, 1.0);  /* insert emissions      */
-  pri->pr->q[0] = 1.0;   esl_vec_DSet(pri->pr->alpha[0], abc->K, 1.0);  /* parameter transitions */
+  pri->tm->q[0] = 1.0;    esl_vec_DSet(pri->tm->alpha[0], 3,      1.0);  /* match transitions     */
+  pri->ti->q[0] = 1.0;    esl_vec_DSet(pri->ti->alpha[0], 3,      1.0);  /* insert transitions    */
+  pri->td->q[0] = 1.0;    esl_vec_DSet(pri->td->alpha[0], 3,      1.0);  /* delete transitions    */
+  pri->em->q[0] = 1.0;    esl_vec_DSet(pri->em->alpha[0], abc->K, 1.0);  /* match emissions       */
+  pri->ei->q[0] = 1.0;    esl_vec_DSet(pri->ei->alpha[0], abc->K, 1.0);  /* insert emissions      */
+  pri->pradg->q[0] = 1.0; esl_vec_DSet(pri->pradg->alpha[0], 3,   1.0);  /* alpha, delta, gamma transitions */
+  pri->prb->q[0] = 1.0;   esl_vec_DSet(pri->prb->alpha[0], 2,     1.0);  /* beta transitions      */
+  pri->pre->q[0] = 1.0;   esl_vec_DSet(pri->pre->alpha[0], 2,     1.0);  /* epsilon transitions */
   return pri;
 
  ERROR:
@@ -287,12 +309,14 @@ void
 p7_prior_Destroy(P7_PRIOR *pri)
 {
   if (pri == NULL) return;
-  if (pri->tm != NULL) esl_mixdchlet_Destroy(pri->tm);
-  if (pri->ti != NULL) esl_mixdchlet_Destroy(pri->ti);
-  if (pri->td != NULL) esl_mixdchlet_Destroy(pri->td);
-  if (pri->em != NULL) esl_mixdchlet_Destroy(pri->em);
-  if (pri->ei != NULL) esl_mixdchlet_Destroy(pri->ei);
-  if (pri->pr != NULL) esl_mixdchlet_Destroy(pri->pr);
+  if (pri->tm    != NULL) esl_mixdchlet_Destroy(pri->tm);
+  if (pri->ti    != NULL) esl_mixdchlet_Destroy(pri->ti);
+  if (pri->td    != NULL) esl_mixdchlet_Destroy(pri->td);
+  if (pri->em    != NULL) esl_mixdchlet_Destroy(pri->em);
+  if (pri->ei    != NULL) esl_mixdchlet_Destroy(pri->ei);
+  if (pri->pradg != NULL) esl_mixdchlet_Destroy(pri->pradg);
+  if (pri->prb   != NULL) esl_mixdchlet_Destroy(pri->prb);
+  if (pri->pre   != NULL) esl_mixdchlet_Destroy(pri->pre);
   free(pri);
 }
 
@@ -412,18 +436,37 @@ f4_ParameterEstimation(P7_HMM *hmm, const P7_PRIOR *pri)
   if (pri==NULL) return p7_hmm_Renormalize(hmm);
 
   /* Parameter transitions 0,1..M
+   * alpha + delta + gamma = 1
    */
   for (k = 0; k <= hmm->M; k++) {
-    esl_vec_F2D(hmm->tp[k], 4, c);
-    esl_mixdchlet_MPParameters(pri->pr, c, p);
-    esl_vec_D2F(p, 4, hmm->tp[k]);
+    esl_vec_F2D(hmm->tp[k], 3, c);
+    esl_mixdchlet_MPParameters(pri->pradg, c, p);
+    esl_vec_D2F(p, 3, hmm->tp[k]);
+  }
+
+  /* Parameter transitions 0,1..M
+   * beta + beta' = 1
+   */
+  for (k = 0; k <= hmm->M; k++) {
+    esl_vec_F2D(hmm->tp[k]+3, 2, c);
+    esl_mixdchlet_MPParameters(pri->prb, c, p);
+    esl_vec_D2F(p, 2, hmm->tp[k]+3);
+  }
+
+  /* Parameter transitions 0,1..M
+   * epsilon + epsilon' = 1
+   */
+  for (k = 0; k <= hmm->M; k++) {
+    esl_vec_F2D(hmm->tp[k]+5, 2, c);
+    esl_mixdchlet_MPParameters(pri->pre, c, p);
+    esl_vec_D2F(p, 2, hmm->tp[k]+5);
   }
 
   /* Match transitions 0,1..M: 0 is the B state
    * TMD at node M is 0.
    */
   for (k = 0; k <= hmm->M; k++) {
-    hmm->t[k][p7H_MM] = 1.0 - hmm->tp[k][f4H_ALPHA] - hmm->tp[k][f4H_DELTA];
+    hmm->t[k][p7H_MM] = hmm->tp[k][f4H_GAMMA];
     hmm->t[k][p7H_MI] = hmm->tp[k][f4H_ALPHA];
     hmm->t[k][p7H_MD] = hmm->tp[k][f4H_DELTA];
   }
@@ -433,9 +476,9 @@ f4_ParameterEstimation(P7_HMM *hmm, const P7_PRIOR *pri)
   /* Insert transitions, 0..M
    */
   for (k = 0; k <= hmm->M; k++) {
-    hmm->t[k][p7H_II] = hmm->tp[k][f4H_BETA] + (1 - hmm->tp[k][f4H_BETA]) * hmm->tp[k][f4H_ALPHA];
-    hmm->t[k][p7H_IM] = (1 - hmm->tp[k][f4H_BETA]) * (1 - hmm->tp[k][f4H_ALPHA] - hmm->tp[k][f4H_DELTA]);
-    hmm->t[k][p7H_ID] = (1 - hmm->tp[k][f4H_BETA]) * hmm->tp[k][f4H_DELTA];
+    hmm->t[k][p7H_II] = hmm->tp[k][f4H_BETA] + hmm->tp[k][f4H_BETAP] * hmm->tp[k][f4H_ALPHA];
+    hmm->t[k][p7H_IM] = (1 - hmm->tp[k][f4H_BETA]) * hmm->tp[k][f4H_GAMMA];
+    hmm->t[k][p7H_ID] = hmm->tp[k][f4H_BETAP] * hmm->tp[k][f4H_DELTA];
   }
 
   /* Delete transitions, 1..M-1
@@ -443,9 +486,9 @@ f4_ParameterEstimation(P7_HMM *hmm, const P7_PRIOR *pri)
    * For k=M, TMM = 1.0 (to the E state) and TMD=0.0 (no next D; must go to E).
    */
   for (k = 1; k < hmm->M; k++) {
-    hmm->t[k][p7H_DD] = hmm->tp[k][f4H_EPSILON] + (1 - hmm->tp[k][f4H_EPSILON]) * hmm->tp[k][f4H_DELTA];
-    hmm->t[k][p7H_DI] = (1 - hmm->tp[k][f4H_EPSILON]) * hmm->tp[k][f4H_ALPHA];
-    hmm->t[k][p7H_DM] = (1 - hmm->tp[k][f4H_EPSILON]) * (1 - hmm->tp[k][f4H_ALPHA] - hmm->tp[k][f4H_DELTA]);
+    hmm->t[k][p7H_DD] = hmm->tp[k][f4H_EPSILON] + hmm->tp[k][f4H_EPSILONP] * hmm->tp[k][f4H_DELTA];
+    hmm->t[k][p7H_DI] = hmm->tp[k][f4H_EPSILONP] * hmm->tp[k][f4H_ALPHA];
+    hmm->t[k][p7H_DM] = hmm->tp[k][f4H_EPSILONP] * hmm->tp[k][f4H_GAMMA];
   }
   hmm->t[0][p7H_DM] = hmm->t[hmm->M][p7H_DM] = 1.0;
   hmm->t[0][p7H_DD] = hmm->t[hmm->M][p7H_DD] = 0.0;
